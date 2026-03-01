@@ -1,0 +1,16 @@
+{
+  "name": "water_backend",
+  "version": "1.0.0",
+  "description": "ESP32 Water Monitor Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.18.2"
+  }
+}
