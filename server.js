@@ -25,7 +25,9 @@ app.post('/api/sensor', (req, res) => {
     latestData.tds = req.body.tds;
     latestData.ph = req.body.ph;
     latestData.turbidity = req.body.turbidity;
-    latestData.time = new Date().toLocaleString();
+    latestData.time = new Date().toLocaleString("en-IN", {
+  timeZone: "Asia/Kolkata"
+});
 
     console.log("Received:", latestData);
 
