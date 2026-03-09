@@ -108,101 +108,196 @@ app.get('/predict-contamination', (req, res) => {
 
 app.get('/dashboard', (req, res) => {
 
-    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+res.send(`
+<html>
 
-    const times = data.map(d =>
-        new Date(d.timestamp).toLocaleTimeString("en-IN", {
-            timeZone: "Asia/Kolkata"
-        })
-    );
+<head>
 
-    const tds = data.map(d => d.tds);
-    const ph = data.map(d => d.ph);
-    const turbidity = data.map(d => d.turbidity);
+<title>Water Quality Dashboard</title>
 
-    res.send(`
-    <html>
-    <head>
-        <title>Water Quality Dashboard</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-        <style>
-        body{
-            background:#0f172a;
-            color:white;
-            font-family:Arial;
-            text-align:center;
-        }
+<style>
 
-        canvas{
-            background:#1e293b;
-            border-radius:10px;
-            padding:10px;
-        }
-        </style>
-    </head>
+body{
+background:#0f172a;
+color:white;
+font-family:Arial;
+text-align:center;
+}
 
-    <body>
+canvas{
+background:#1e293b;
+border-radius:10px;
+padding:10px;
+}
 
-        <h1>Water Quality Monitoring</h1>
+.status{
+font-size:22px;
+margin:20px;
+}
 
-        <canvas id="chart" width="900" height="400"></canvas>
+.safe{color:lime}
+.warning{color:red}
 
-        <script>
+</style>
 
-        const labels = ${JSON.stringify(times)};
+</head>
 
-        const data = {
-            labels: labels,
-            datasets: [
+<body>
 
-            {
-                label: 'TDS (ppm)',
-                data: ${JSON.stringify(tds)},
-                borderColor: 'cyan',
-                tension: 0.4
-            },
+<h1>💧 Water Quality Monitoring</h1>
 
-            {
-                label: 'pH',
-                data: ${JSON.stringify(ph)},
-                borderColor: 'lime',
-                tension: 0.4
-            },
+<div id="status" class="status safe">Status: SAFE</div>
+<div id="prediction" class="status"></div>
 
-            {
-                label: 'Turbidity',
-                data: ${JSON.stringify(turbidity)},
-                borderColor: 'orange',
-                tension: 0.4
-            }
+<canvas id="chart" width="900" height="400"></canvas>
 
-            ]
-        };
+<script>
 
-        new Chart(document.getElementById('chart'), {
-            type: 'line',
-            data: data,
-            options:{
-                responsive:true,
-                plugins:{
-                    legend:{labels:{color:'white'}}
-                },
-                scales:{
-                    x:{ticks:{color:'white'}},
-                    y:{ticks:{color:'white'}}
-                }
-            }
-        });
+const chart = new Chart(document.getElementById('chart'), {
 
-        </script>
+type:'line',
 
-    </body>
-    </html>
-    `);
+data:{
+labels:[],
+datasets:[
+
+{
+label:'TDS',
+data:[],
+borderColor:'cyan',
+tension:0.4
+},
+
+{
+label:'pH',
+data:[],
+borderColor:'lime',
+tension:0.4
+},
+
+{
+label:'Turbidity',
+data:[],
+borderColor:'orange',
+tension:0.4
+},
+
+{
+label:'Predicted TDS',
+data:[],
+borderColor:'magenta',
+borderDash:[6,6]
+}
+
+]
+},
+
+options:{
+responsive:true,
+plugins:{
+legend:{labels:{color:'white'}}
+},
+scales:{
+x:{ticks:{color:'white'}},
+y:{ticks:{color:'white'}}
+}
+}
 
 });
 
+
+async function updateChart(){
+
+const res = await fetch('/latest');
+const data = await res.json();
+
+if(!data.timestamp) return;
+
+const time = new Date(data.timestamp).toLocaleTimeString();
+
+chart.data.labels.push(time);
+
+chart.data.datasets[0].data.push(data.tds);
+chart.data.datasets[1].data.push(data.ph);
+chart.data.datasets[2].data.push(data.turbidity);
+
+if(chart.data.labels.length > 20){
+
+chart.data.labels.shift();
+chart.data.datasets.forEach(d=>d.data.shift());
+
+}
+
+chart.update();
+
+checkStatus(data);
+
+}
+
+
+async function getPrediction(){
+
+const res = await fetch('/predict-contamination');
+const pred = await res.json();
+
+if(!pred.slopes) return;
+
+const slope = pred.slopes.tds;
+
+const lastTDS = chart.data.datasets[0].data.slice(-1)[0];
+
+const future = lastTDS + slope * 60;
+
+chart.data.datasets[3].data = [...chart.data.datasets[0].data];
+
+chart.data.datasets[3].data.push(future);
+
+chart.update();
+
+if(pred.contaminationPrediction.tds){
+
+document.getElementById("prediction").innerHTML =
+"⚠ Predicted contamination at: " + pred.contaminationPrediction.tds;
+
+}
+
+}
+
+
+function checkStatus(data){
+
+const statusDiv = document.getElementById("status");
+
+if(data.tds > 500 || data.turbidity > 30 || data.ph < 6.5 || data.ph > 8.5){
+
+statusDiv.innerHTML="⚠ CONTAMINATED";
+statusDiv.className="status warning";
+
+}
+
+else{
+
+statusDiv.innerHTML="✓ SAFE";
+statusDiv.className="status safe";
+
+}
+
+}
+
+
+setInterval(updateChart,5000);
+setInterval(getPrediction,10000);
+
+</script>
+
+</body>
+
+</html>
+
+`);
+});
 
 // -------- START SERVER --------
 app.listen(PORT, () => {
