@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
+const SimpleLinearRegression = require('ml-regression-simple-linear');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -14,6 +15,7 @@ const DATA_FILE = "water_data.json";
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, "[]");
 }
+
 
 // -------- RECEIVE DATA FROM ESP32 --------
 app.post('/api/sensor', (req, res) => {
@@ -36,103 +38,71 @@ app.post('/api/sensor', (req, res) => {
 });
 
 
-// -------- DASHBOARD WITH GRAPHS --------
-app.get('/', (req, res) => {
+// -------- GET CURRENT DATA --------
+app.get('/latest', (req, res) => {
 
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
 
-    const times = data.map(d =>
-        new Date(d.timestamp).toLocaleTimeString("en-IN", {
+    if (data.length === 0) {
+        return res.json({ message: "No data yet" });
+    }
+
+    res.json(data[data.length - 1]);
+});
+
+
+// -------- LINEAR REGRESSION CONTAMINATION PREDICTION --------
+app.get('/predict-contamination', (req, res) => {
+
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+    if (data.length < 5) {
+        return res.json({
+            error: "Not enough data for prediction (need at least 5 readings)"
+        });
+    }
+
+    const t0 = data[0].timestamp;
+
+    const x = data.map(d => (d.timestamp - t0) / 1000);
+
+    const tds = data.map(d => d.tds);
+    const ph = data.map(d => d.ph);
+    const turb = data.map(d => d.turbidity);
+
+    const tdsModel = new SimpleLinearRegression(x, tds);
+    const phModel = new SimpleLinearRegression(x, ph);
+    const turbModel = new SimpleLinearRegression(x, turb);
+
+    const TDS_LIMIT = 500;
+    const TURB_LIMIT = 30;
+
+    let contaminationTimes = {};
+
+    // Predict TDS contamination
+    if (tdsModel.slope > 0) {
+        const t = (TDS_LIMIT - tdsModel.intercept) / tdsModel.slope;
+        contaminationTimes.tds = new Date(t0 + t * 1000).toLocaleString("en-IN", {
             timeZone: "Asia/Kolkata"
-        })
-    );
+        });
+    }
 
-    const tdsValues = data.map(d => d.tds);
-    const phValues = data.map(d => d.ph);
-    const turbidityValues = data.map(d => d.turbidity);
+    // Predict turbidity contamination
+    if (turbModel.slope > 0) {
+        const t = (TURB_LIMIT - turbModel.intercept) / turbModel.slope;
+        contaminationTimes.turbidity = new Date(t0 + t * 1000).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata"
+        });
+    }
 
-    res.send(`
-    <html>
-    <head>
-        <title>Water Quality Dashboard</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <meta http-equiv="refresh" content="10">
-        <style>
-            body {
-                background: #0f172a;
-                color: white;
-                font-family: Arial;
-                text-align: center;
-            }
-            h1 {
-                color: cyan;
-            }
-            canvas {
-                background: #1e293b;
-                margin: 20px;
-                padding: 10px;
-                border-radius: 10px;
-                max-width: 900px;
-            }
-        </style>
-    </head>
-    <body>
-
-        <h1>💧 Water Quality Monitoring Dashboard</h1>
-
-        <canvas id="tdsChart"></canvas>
-        <canvas id="phChart"></canvas>
-        <canvas id="turbChart"></canvas>
-
-        <script>
-            const labels = ${JSON.stringify(times)};
-
-            new Chart(document.getElementById("tdsChart"), {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'TDS (ppm)',
-                        data: ${JSON.stringify(tdsValues)},
-                        borderColor: 'cyan',
-                        borderWidth: 2,
-                        fill: false
-                    }]
-                }
-            });
-
-            new Chart(document.getElementById("phChart"), {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'pH',
-                        data: ${JSON.stringify(phValues)},
-                        borderColor: 'lime',
-                        borderWidth: 2,
-                        fill: false
-                    }]
-                }
-            });
-
-            new Chart(document.getElementById("turbChart"), {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Turbidity (%)',
-                        data: ${JSON.stringify(turbidityValues)},
-                        borderColor: 'orange',
-                        borderWidth: 2,
-                        fill: false
-                    }]
-                }
-            });
-        </script>
-
-    </body>
-    </html>
-    `);
+    res.json({
+        slopes: {
+            tds: tdsModel.slope,
+            ph: phModel.slope,
+            turbidity: turbModel.slope
+        },
+        contaminationPrediction: contaminationTimes
+    });
 });
 
 
