@@ -106,6 +106,104 @@ app.get('/predict-contamination', (req, res) => {
 });
 
 
+app.get('/dashboard', (req, res) => {
+
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+    const times = data.map(d =>
+        new Date(d.timestamp).toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata"
+        })
+    );
+
+    const tds = data.map(d => d.tds);
+    const ph = data.map(d => d.ph);
+    const turbidity = data.map(d => d.turbidity);
+
+    res.send(`
+    <html>
+    <head>
+        <title>Water Quality Dashboard</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+        <style>
+        body{
+            background:#0f172a;
+            color:white;
+            font-family:Arial;
+            text-align:center;
+        }
+
+        canvas{
+            background:#1e293b;
+            border-radius:10px;
+            padding:10px;
+        }
+        </style>
+    </head>
+
+    <body>
+
+        <h1>Water Quality Monitoring</h1>
+
+        <canvas id="chart" width="900" height="400"></canvas>
+
+        <script>
+
+        const labels = ${JSON.stringify(times)};
+
+        const data = {
+            labels: labels,
+            datasets: [
+
+            {
+                label: 'TDS (ppm)',
+                data: ${JSON.stringify(tds)},
+                borderColor: 'cyan',
+                tension: 0.4
+            },
+
+            {
+                label: 'pH',
+                data: ${JSON.stringify(ph)},
+                borderColor: 'lime',
+                tension: 0.4
+            },
+
+            {
+                label: 'Turbidity',
+                data: ${JSON.stringify(turbidity)},
+                borderColor: 'orange',
+                tension: 0.4
+            }
+
+            ]
+        };
+
+        new Chart(document.getElementById('chart'), {
+            type: 'line',
+            data: data,
+            options:{
+                responsive:true,
+                plugins:{
+                    legend:{labels:{color:'white'}}
+                },
+                scales:{
+                    x:{ticks:{color:'white'}},
+                    y:{ticks:{color:'white'}}
+                }
+            }
+        });
+
+        </script>
+
+    </body>
+    </html>
+    `);
+
+});
+
+
 // -------- START SERVER --------
 app.listen(PORT, () => {
     console.log("Server running on port", PORT);
