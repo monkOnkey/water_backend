@@ -56,12 +56,15 @@ res.json(data[data.length-1]);
 
 // ---------------- PREDICTION ----------------
 
-app.get('/predict-contamination',(req,res)=>{
+app.get('/predict-contamination', (req, res) => {
 
 const data = JSON.parse(fs.readFileSync(DATA_FILE));
 
-if(data.length < 5){
-return res.json({error:"Need more data"});
+if (data.length < 5) {
+return res.json({
+status:"insufficient_data",
+message:"Prediction requires at least 5 sensor readings"
+});
 }
 
 const t0 = data[0].timestamp;
@@ -73,39 +76,98 @@ const ph = data.map(d=>d.ph);
 const turb = data.map(d=>d.turbidity);
 
 const tdsModel = new SimpleLinearRegression(x,tds);
+const phModel = new SimpleLinearRegression(x,ph);
 const turbModel = new SimpleLinearRegression(x,turb);
 
 const TDS_LIMIT = 500;
 const TURB_LIMIT = 30;
+const PH_LOW_LIMIT = 6.5;
+const PH_HIGH_LIMIT = 8.5;
 
-let contaminationTimes={};
+let predictions = [];
 
-if(tdsModel.slope>0){
+function addPrediction(parameter,time){
 
-const t=(TDS_LIMIT-tdsModel.intercept)/tdsModel.slope;
-
-contaminationTimes.tds=new Date(t0+t*1000).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
+predictions.push({
+parameter:parameter,
+predictedTime:new Date(t0 + time*1000)
+.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})
+});
 
 }
 
-if(turbModel.slope>0){
+// -------- TDS --------
+if(tdsModel.slope !== 0){
 
-const t=(TURB_LIMIT-turbModel.intercept)/turbModel.slope;
+const t=(TDS_LIMIT - tdsModel.intercept)/tdsModel.slope;
 
-contaminationTimes.turbidity=new Date(t0+t*1000).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
+if(t>0){
+addPrediction("TDS",t);
+}
+
+}
+
+// -------- TURBIDITY --------
+if(turbModel.slope !== 0){
+
+const t=(TURB_LIMIT - turbModel.intercept)/turbModel.slope;
+
+if(t>0){
+addPrediction("Turbidity",t);
+}
+
+}
+
+// -------- PH --------
+if(phModel.slope !== 0){
+
+const tLow=(PH_LOW_LIMIT - phModel.intercept)/phModel.slope;
+const tHigh=(PH_HIGH_LIMIT - phModel.intercept)/phModel.slope;
+
+if(tLow>0){
+addPrediction("pH (Acidic)",tLow);
+}
+
+if(tHigh>0){
+addPrediction("pH (Alkaline)",tHigh);
+}
+
+}
+
+// -------- EARLIEST CONTAMINATION --------
+let earliest=null;
+
+if(predictions.length>0){
+
+earliest=predictions.reduce((a,b)=>
+new Date(a.predictedTime) < new Date(b.predictedTime) ? a : b
+);
 
 }
 
 res.json({
-slopes:{
-tds:tdsModel.slope,
-turbidity:turbModel.slope
+
+predictionReport:{
+
+status:"analysis_complete",
+
+parametersAnalyzed:["TDS","pH","Turbidity"],
+
+trendAnalysis:{
+tdsSlope:tdsModel.slope,
+phSlope:phModel.slope,
+turbiditySlope:turbModel.slope
 },
-contaminationPrediction:contaminationTimes
-});
+
+earliestRisk:earliest,
+
+allPredictions:predictions
+
+}
 
 });
 
+});
 
 // ---------------- DASHBOARD ----------------
 
