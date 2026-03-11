@@ -25,9 +25,9 @@ turbidity REAL
 `);
 
 
-// ---------------- RECEIVE DATA ----------------
+// ---------------- RECEIVE SENSOR DATA ----------------
 
-app.post('/api/sensor', (req,res)=>{
+app.post('/api/sensor',(req,res)=>{
 
 const timestamp = Date.now();
 const tds = Number(req.body.tds);
@@ -80,10 +80,7 @@ res.json(row);
 
 app.get('/predict-contamination',(req,res)=>{
 
-db.all(
-`SELECT * FROM sensor_data ORDER BY timestamp ASC`,
-[],
-(err,data)=>{
+db.all(`SELECT * FROM sensor_data ORDER BY timestamp ASC`,[],(err,data)=>{
 
 if(err) return res.json({error:"database error"});
 
@@ -116,7 +113,7 @@ let predictions=[];
 function addPrediction(parameter,time){
 
 predictions.push({
-parameter:parameter,
+parameter,
 predictedTime:new Date(t0+time*1000)
 .toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})
 });
@@ -124,31 +121,29 @@ predictedTime:new Date(t0+time*1000)
 }
 
 
-// TDS
-if(tdsModel.slope !== 0){
+// TDS prediction
+if(tdsModel.slope!==0){
 
-const t=(TDS_LIMIT - tdsModel.intercept)/tdsModel.slope;
+const t=(TDS_LIMIT-tdsModel.intercept)/tdsModel.slope;
 
 if(t>0) addPrediction("TDS",t);
 
 }
 
+// Turbidity prediction
+if(turbModel.slope!==0){
 
-// Turbidity
-if(turbModel.slope !== 0){
-
-const t=(TURB_LIMIT - turbModel.intercept)/turbModel.slope;
+const t=(TURB_LIMIT-turbModel.intercept)/turbModel.slope;
 
 if(t>0) addPrediction("Turbidity",t);
 
 }
 
+// pH prediction
+if(phModel.slope!==0){
 
-// pH
-if(phModel.slope !== 0){
-
-const tLow=(PH_LOW_LIMIT - phModel.intercept)/phModel.slope;
-const tHigh=(PH_HIGH_LIMIT - phModel.intercept)/phModel.slope;
+const tLow=(PH_LOW_LIMIT-phModel.intercept)/phModel.slope;
+const tHigh=(PH_HIGH_LIMIT-phModel.intercept)/phModel.slope;
 
 if(tLow>0) addPrediction("pH (Acidic)",tLow);
 if(tHigh>0) addPrediction("pH (Alkaline)",tHigh);
@@ -156,13 +151,12 @@ if(tHigh>0) addPrediction("pH (Alkaline)",tHigh);
 }
 
 
-// earliest
 let earliest=null;
 
 if(predictions.length>0){
 
 earliest=predictions.reduce((a,b)=>
-new Date(a.predictedTime) < new Date(b.predictedTime) ? a : b
+new Date(a.predictedTime)<new Date(b.predictedTime)?a:b
 );
 
 }
@@ -195,7 +189,178 @@ allPredictions:predictions
 
 app.get('/dashboard',(req,res)=>{
 
-res.sendFile(__dirname + "/dashboard.html");
+res.send(`
+
+<html>
+
+<head>
+
+<title>Smart Water Monitoring</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-gauges/gauge.min.js"></script>
+
+<style>
+
+body{
+background:#0f172a;
+color:white;
+font-family:Arial;
+text-align:center;
+}
+
+.container{
+display:flex;
+justify-content:center;
+gap:40px;
+margin-top:40px;
+}
+
+.card{
+background:#1e293b;
+padding:20px;
+border-radius:10px;
+}
+
+.status{
+font-size:22px;
+margin:20px;
+}
+
+.safe{color:lime}
+.warning{color:red}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>💧 Water Monitoring Dashboard</h1>
+
+<div id="status" class="status safe">SAFE</div>
+<div id="prediction"></div>
+
+<div class="container">
+
+<div class="card"><canvas id="phGauge"></canvas></div>
+<div class="card"><canvas id="tdsGauge"></canvas></div>
+<div class="card"><canvas id="turbGauge"></canvas></div>
+
+</div>
+
+<br>
+
+<canvas id="chart" width="800" height="350"></canvas>
+
+
+<script>
+
+const phGauge=new RadialGauge({
+renderTo:'phGauge',
+width:250,
+height:250,
+units:"pH",
+minValue:0,
+maxValue:14
+}).draw();
+
+const tdsGauge=new RadialGauge({
+renderTo:'tdsGauge',
+width:250,
+height:250,
+units:"ppm",
+minValue:0,
+maxValue:1000
+}).draw();
+
+const turbGauge=new RadialGauge({
+renderTo:'turbGauge',
+width:250,
+height:250,
+units:"NTU",
+minValue:0,
+maxValue:100
+}).draw();
+
+
+const chart=new Chart(document.getElementById("chart"),{
+
+type:"line",
+
+data:{
+labels:[],
+datasets:[
+{label:"TDS",data:[],borderColor:"cyan"},
+{label:"pH",data:[],borderColor:"lime"},
+{label:"Turbidity",data:[],borderColor:"orange"}
+]
+}
+
+});
+
+
+async function update(){
+
+const res=await fetch('/latest');
+const data=await res.json();
+
+if(!data.timestamp) return;
+
+const time=new Date(data.timestamp).toLocaleTimeString();
+
+phGauge.value=data.ph;
+tdsGauge.value=data.tds;
+turbGauge.value=data.turbidity;
+
+chart.data.labels.push(time);
+
+chart.data.datasets[0].data.push(data.tds);
+chart.data.datasets[1].data.push(data.ph);
+chart.data.datasets[2].data.push(data.turbidity);
+
+if(chart.data.labels.length>20){
+
+chart.data.labels.shift();
+chart.data.datasets.forEach(d=>d.data.shift());
+
+}
+
+chart.update();
+
+checkStatus(data);
+
+}
+
+
+function checkStatus(data){
+
+const status=document.getElementById("status");
+
+if(data.tds>500 || data.turbidity>30 || data.ph<6.5 || data.ph>8.5){
+
+status.innerHTML="⚠ CONTAMINATED";
+status.className="status warning";
+
+}else{
+
+status.innerHTML="✓ SAFE";
+status.className="status safe";
+
+}
+
+}
+
+
+setInterval(update,5000);
+
+</script>
+
+</body>
+
+</html>
+
+`);
 
 });
 
