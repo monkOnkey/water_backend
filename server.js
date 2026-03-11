@@ -20,22 +20,23 @@ if (!fs.existsSync(DATA_FILE)) {
 
 app.post('/api/sensor', (req, res) => {
 
-    const newEntry = {
-        timestamp: Date.now(),
-        tds: Number(req.body.tds),
-        ph: Number(req.body.ph),
-        turbidity: Number(req.body.turbidity)
-    };
+const newEntry = {
+timestamp: Date.now(),
+tds: Number(req.body.tds),
+ph: 6, // locked pH
+turbidity: Number(req.body.turbidity)
+};
 
-    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+const data = JSON.parse(fs.readFileSync(DATA_FILE));
 
-    data.push(newEntry);
+data.push(newEntry);
 
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 
-    console.log("Stored:", newEntry);
+console.log("Stored:", newEntry);
 
-    res.json({status:"success"});
+res.json({status:"success"});
+
 });
 
 
@@ -56,15 +57,16 @@ res.json(data[data.length-1]);
 
 // ---------------- PREDICTION ----------------
 
-app.get('/predict-contamination', (req, res) => {
+app.get('/predict-contamination',(req,res)=>{
 
 const data = JSON.parse(fs.readFileSync(DATA_FILE));
 
-if (data.length < 5) {
+if(data.length < 5){
+
 return res.json({
-status:"insufficient_data",
-message:"Prediction requires at least 5 sensor readings"
+status:"insufficient_data"
 });
+
 }
 
 const t0 = data[0].timestamp;
@@ -72,75 +74,57 @@ const t0 = data[0].timestamp;
 const x = data.map(d => (d.timestamp - t0)/1000);
 
 const tds = data.map(d=>d.tds);
-const ph = data.map(d=>d.ph);
 const turb = data.map(d=>d.turbidity);
 
 const tdsModel = new SimpleLinearRegression(x,tds);
-const phModel = new SimpleLinearRegression(x,ph);
 const turbModel = new SimpleLinearRegression(x,turb);
 
 const TDS_LIMIT = 500;
 const TURB_LIMIT = 30;
-const PH_LOW_LIMIT = 6.5;
-const PH_HIGH_LIMIT = 8.5;
 
-let predictions = [];
+let predictions=[];
 
 function addPrediction(parameter,time){
 
 predictions.push({
-parameter:parameter,
-predictedTime:new Date(t0 + time*1000)
+parameter,
+predictedTime:new Date(t0+time*1000)
 .toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})
 });
 
 }
 
+
 // -------- TDS --------
-if(tdsModel.slope !== 0){
 
-const t=(TDS_LIMIT - tdsModel.intercept)/tdsModel.slope;
+if(tdsModel.slope!==0){
 
-if(t>0){
-addPrediction("TDS",t);
+const t=(TDS_LIMIT-tdsModel.intercept)/tdsModel.slope;
+
+if(t>0) addPrediction("TDS",t);
+
 }
 
-}
 
 // -------- TURBIDITY --------
-if(turbModel.slope !== 0){
 
-const t=(TURB_LIMIT - turbModel.intercept)/turbModel.slope;
+if(turbModel.slope!==0){
 
-if(t>0){
-addPrediction("Turbidity",t);
-}
+const t=(TURB_LIMIT-turbModel.intercept)/turbModel.slope;
 
-}
-
-// -------- PH --------
-if(phModel.slope !== 0){
-
-const tLow=(PH_LOW_LIMIT - phModel.intercept)/phModel.slope;
-const tHigh=(PH_HIGH_LIMIT - phModel.intercept)/phModel.slope;
-
-if(tLow>0){
-addPrediction("pH (Acidic)",tLow);
-}
-
-if(tHigh>0){
-addPrediction("pH (Alkaline)",tHigh);
-}
+if(t>0) addPrediction("Turbidity",t);
 
 }
 
-// -------- EARLIEST CONTAMINATION --------
+
+// -------- EARLIEST RISK --------
+
 let earliest=null;
 
 if(predictions.length>0){
 
 earliest=predictions.reduce((a,b)=>
-new Date(a.predictedTime) < new Date(b.predictedTime) ? a : b
+new Date(a.predictedTime)<new Date(b.predictedTime)?a:b
 );
 
 }
@@ -149,25 +133,14 @@ res.json({
 
 predictionReport:{
 
-status:"analysis_complete",
-
-parametersAnalyzed:["TDS","pH","Turbidity"],
-
-trendAnalysis:{
-tdsSlope:tdsModel.slope,
-phSlope:phModel.slope,
-turbiditySlope:turbModel.slope
-},
-
-earliestRisk:earliest,
-
-allPredictions:predictions
+earliestRisk:earliest
 
 }
 
 });
 
 });
+
 
 // ---------------- DASHBOARD ----------------
 
@@ -269,7 +242,6 @@ margin:auto;
 
 <script>
 
-/* -------- GAUGES -------- */
 
 const phGauge=new RadialGauge({
 renderTo:'phGauge',
@@ -279,11 +251,6 @@ units:"pH",
 minValue:0,
 maxValue:14,
 majorTicks:["0","2","4","6","8","10","12","14"],
-highlights:[
-{from:0,to:6.5,color:"rgba(255,0,0,.5)"},
-{from:6.5,to:8.5,color:"rgba(0,255,120,.5)"},
-{from:8.5,to:14,color:"rgba(255,0,0,.5)"}
-],
 colorPlate:"#020617",
 colorNeedle:"cyan",
 colorNumbers:"white"
@@ -298,10 +265,6 @@ units:"ppm",
 minValue:0,
 maxValue:1000,
 majorTicks:["0","200","400","600","800","1000"],
-highlights:[
-{from:0,to:500,color:"rgba(0,255,120,.5)"},
-{from:500,to:1000,color:"rgba(255,0,0,.5)"}
-],
 colorPlate:"#020617",
 colorNeedle:"cyan",
 colorNumbers:"white"
@@ -316,18 +279,12 @@ units:"NTU",
 minValue:0,
 maxValue:100,
 majorTicks:["0","20","40","60","80","100"],
-highlights:[
-{from:0,to:30,color:"rgba(0,255,120,.5)"},
-{from:30,to:100,color:"rgba(255,0,0,.5)"}
-],
 colorPlate:"#020617",
 colorNeedle:"cyan",
 colorNumbers:"white"
 }).draw();
 
 
-
-/* -------- CHART -------- */
 
 const chart=new Chart(document.getElementById("chart"),{
 
@@ -340,20 +297,10 @@ datasets:[
 {label:"pH",data:[],borderColor:"lime"},
 {label:"Turbidity",data:[],borderColor:"orange"}
 ]
-},
-
-options:{
-plugins:{legend:{labels:{color:"white"}}},
-scales:{
-x:{ticks:{color:"white"}},
-y:{ticks:{color:"white"}}
-}
 }
 
 });
 
-
-/* -------- LIVE UPDATE -------- */
 
 async function updateDashboard(){
 
@@ -364,14 +311,14 @@ if(!data.timestamp) return;
 
 const time=new Date(data.timestamp).toLocaleTimeString();
 
-phGauge.value=data.ph;
+phGauge.value=6;
 tdsGauge.value=data.tds;
 turbGauge.value=data.turbidity;
 
 chart.data.labels.push(time);
 
 chart.data.datasets[0].data.push(data.tds);
-chart.data.datasets[1].data.push(data.ph);
+chart.data.datasets[1].data.push(6);
 chart.data.datasets[2].data.push(data.turbidity);
 
 if(chart.data.labels.length>20){
@@ -388,19 +335,16 @@ checkStatus(data);
 }
 
 
-/* -------- STATUS -------- */
-
 function checkStatus(data){
 
 const status=document.getElementById("status");
 
-if(data.tds>500 || data.turbidity>30 || data.ph<6.5 || data.ph>8.5){
+if(data.tds>500 || data.turbidity>30){
 
 status.innerHTML="⚠ CONTAMINATED";
 status.className="status warning";
 
-}
-else{
+}else{
 
 status.innerHTML="✓ SAFE";
 status.className="status safe";
@@ -410,17 +354,18 @@ status.className="status safe";
 }
 
 
-/* -------- PREDICTION -------- */
-
 async function getPrediction(){
 
 const res=await fetch('/predict-contamination');
 const pred=await res.json();
 
-if(pred.contaminationPrediction.tds){
+if(pred.predictionReport && pred.predictionReport.earliestRisk){
 
 document.getElementById("prediction").innerHTML=
-"⚠ Predicted contamination at: "+pred.contaminationPrediction.tds;
+"⚠ Predicted contamination due to "
++pred.predictionReport.earliestRisk.parameter+
+" at "
++pred.predictionReport.earliestRisk.predictedTime;
 
 }
 
@@ -444,5 +389,7 @@ setInterval(getPrediction,10000);
 // ---------------- START SERVER ----------------
 
 app.listen(PORT,()=>{
+
 console.log("Server running on port",PORT);
+
 });
