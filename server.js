@@ -79,7 +79,7 @@ const turb = data.map(d=>d.turbidity);
 const tdsModel = new SimpleLinearRegression(x,tds);
 const turbModel = new SimpleLinearRegression(x,turb);
 
-const TDS_LIMIT = 500;
+const TDS_LIMIT = 300;
 const TURB_LIMIT = 30;
 
 let predictions=[];
